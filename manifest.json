@@ -27,7 +27,7 @@
 	},
 	"name": "Copy All Urls",
 	"options_page": "options.html",
-	"permissions": ["tabs", "management", "clipboardRead", "clipboardWrite", "notifications"],
+	"permissions": ["tabs", "management", "clipboardRead", "clipboardWrite", "notifications", "offscreen", "storage"],
 	"host_permissions": ["http://*/*", "https://*/*"],
 	"content_security_policy": {
 		"extension_pages": "script-src 'self'; object-src 'self'"

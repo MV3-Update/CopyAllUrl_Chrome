@@ -95,22 +95,26 @@ jQuery(function($){
 	});
 	
 	// Default action
-	var default_action = localStorage['default_action'] ? localStorage['default_action'] : "menu";
-	if( default_action != "menu" ){
-		// Masquage des boutons
-		$('body>ul').hide();
-		$('#message').css({'padding':'3px 0 5px'});
-		
-		// Déclenchement de l'action par défaut configurée dans les options
-		switch(default_action){
-			case "copy":
-				$('#actionCopy').trigger('click', [true]);
-				break;
-			case "paste":
-				$('#actionPaste').trigger('click', [true]);
-				break;
+	chrome.storage.local.get({
+		'default_action': 'menu'
+	}).then((settings) => {
+		var default_action = settings.default_action;
+		if( default_action != "menu" ){
+			// Masquage des boutons
+			$('body>ul').hide();
+			$('#message').css({'padding':'3px 0 5px'});
+			
+			// Déclenchement de l'action par défaut configurée dans les options
+			switch(default_action){
+				case "copy":
+					$('#actionCopy').trigger('click', [true]);
+					break;
+				case "paste":
+					$('#actionPaste').trigger('click', [true]);
+					break;
+			}
 		}
-	}
+	});
 	
 	// Affichage notification nouvelle version dans la page d'option
 	if (bkg && bkg.UpdateManager && bkg.UpdateManager.recentUpdate()) {

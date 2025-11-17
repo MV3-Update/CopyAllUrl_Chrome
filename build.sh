@@ -105,6 +105,8 @@ INCLUDE_FILES=(
     "popup.css"
     "options.html"
     "options.js"
+    "offscreen.html"
+    "offscreen.js"
     "img/"
     "vendor/"
 )

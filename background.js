@@ -1,58 +1,74 @@
-// Import dependencies for service worker
-importScripts('vendor/jquery-1.7.2_min.js', 'vendor/encoder.js');
-
-// Global variables
-let clipboardBuffer;
+// Import dependencies for service worker (excluding jQuery which doesn't work in service workers)
+importScripts('vendor/encoder.js');
 
 /**
-* Gére l'accès au presse papier
-* (on est obligé de passer par la background page pour y accéder, cf: http://stackoverflow.com/questions/6925073/copy-paste-not-working-in-chrome-extension)
-*/
+ * Clipboard operations for Manifest V3 service worker
+ * Uses offscreen document for reliable clipboard access
+ */
 Clipboard = {
 	/**
-	* Ecrit la chaîne passée en paramètre dans le presse papier (fonction "Copier")
-	* Updated for Manifest V3 - uses chrome.offscreen API for clipboard access
-	*
-	* @param String str Chaîne à copier dans le presse-papier
-	* @param Bool extended_mime Indique si on doit copier le type MIME text/html en plus du texte brut
-	*/
-	write: function(str, extended_mime){
-		if(str == '' || str == undefined){
+	 * Write to clipboard using offscreen document
+	 */
+	write: async function(str, extended_mime) {
+		if (!str || str === '') {
 			str = '<empty>';
 		}
 		
-		// Use navigator.clipboard API in Manifest V3
-		if (navigator.clipboard && navigator.clipboard.writeText) {
-			if (extended_mime && navigator.clipboard.write) {
-				// For HTML content
-				const clipboardItem = new ClipboardItem({
-					'text/html': new Blob([str], { type: 'text/html' }),
-					'text/plain': new Blob([str], { type: 'text/plain' })
-				});
-				navigator.clipboard.write([clipboardItem]).catch(err => {
-					console.error('Failed to write to clipboard:', err);
-				});
-			} else {
-				// For plain text
-				navigator.clipboard.writeText(str).catch(err => {
-					console.error('Failed to write to clipboard:', err);
+		try {
+			// Check if offscreen document already exists
+			const existingContexts = await chrome.runtime.getContexts({
+				contextTypes: ['OFFSCREEN_DOCUMENT']
+			});
+			
+			if (existingContexts.length === 0) {
+				// Create offscreen document for clipboard access
+				await chrome.offscreen.createDocument({
+					url: 'offscreen.html',
+					reasons: ['CLIPBOARD'],
+					justification: 'Write data to clipboard'
 				});
 			}
+			
+			// Send data to offscreen document
+			await chrome.runtime.sendMessage({
+				type: 'clipboard-write',
+				data: str,
+				html: extended_mime
+			});
+		} catch (error) {
+			console.error('Failed to write to clipboard:', error);
 		}
 	},
 	
 	/**
-	* Retourne le contenu du presse papier (String)
-	* Updated for Manifest V3
-	*/
-	read: function(){
-		if (navigator.clipboard && navigator.clipboard.readText) {
-			return navigator.clipboard.readText().catch(err => {
-				console.error('Failed to read from clipboard:', err);
-				return '';
+	 * Read from clipboard using offscreen document
+	 */
+	read: async function() {
+		try {
+			// Check if offscreen document already exists
+			const existingContexts = await chrome.runtime.getContexts({
+				contextTypes: ['OFFSCREEN_DOCUMENT']
 			});
+			
+			if (existingContexts.length === 0) {
+				// Create offscreen document for clipboard access
+				await chrome.offscreen.createDocument({
+					url: 'offscreen.html',
+					reasons: ['CLIPBOARD'],
+					justification: 'Read data from clipboard'
+				});
+			}
+			
+			// Request data from offscreen document
+			const response = await chrome.runtime.sendMessage({
+				type: 'clipboard-read'
+			});
+			
+			return response || '';
+		} catch (error) {
+			console.error('Failed to read from clipboard:', error);
+			return '';
 		}
-		return Promise.resolve('');
 	}
 };
 
@@ -61,29 +77,35 @@ Clipboard = {
 */
 Action = {
 	/**
-	* Copie les URLs de la fenêtre passé en paramètre dans le presse papier
-	* @param opt.window  : fenêtre dont on copie les URL
-	* @param opt.gaEvent : données nécessaires à la génération le l'event ga (action, label, actionMeta)
+	* Copy URLs from the specified window to clipboard
+	* @param opt.window  : window to copy URLs from
+	* @param opt.gaEvent : data needed for GA event generation (action, label, actionMeta)
 	*/
-	copy: function(opt){
-		// Par défaut, on récupère tous les onglets de la fenêtre opt.window
+	copy: async function(opt){
+		// By default, get all tabs from window opt.window
 		var tabQuery = {windowId: opt.window.id};
 		
-		// Si "Copy tabs from all windows" est coché, suppression du filtre sur fenêtre courante
-		try {
-			if (localStorage["walk_all_windows"] == "true") {
-				tabQuery.windowId = null;
-			}
-		} catch(ex) {}
+		// Get settings from chrome.storage
+		const settings = await chrome.storage.local.get({
+			'walk_all_windows': 'false',
+			'format': 'text',
+			'highlighted_tab_only': 'false',
+			'mime': 'plaintext'
+		});
 		
-		chrome.tabs.query(tabQuery, function(tabs){
-			// Récupération configuration
-			var format = localStorage['format'] ? localStorage['format'] : 'text';
-			var highlighted_tab_only = localStorage['highlighted_tab_only'] == 'true' ? true : false;
-			var extended_mime = typeof localStorage['mime'] != 'undefined' && localStorage['mime'] == 'html' ? true : false;
+		// If "Copy tabs from all windows" is checked, remove filter on current window
+		if (settings.walk_all_windows === "true") {
+			tabQuery.windowId = null;
+		}
+		
+		chrome.tabs.query(tabQuery, async function(tabs){
+			// Get configuration
+			var format = settings.format;
+			var highlighted_tab_only = settings.highlighted_tab_only === 'true';
+			var extended_mime = settings.mime === 'html';
 			var outputText = '';
 			
-			// Filtrage des onglets
+			// Filter tabs
 			var tabs_filtered = [];
 			for (var i=0; i < tabs.length; i++) {
 				if( highlighted_tab_only && !tabs[i].highlighted ) continue;
@@ -91,11 +113,11 @@ Action = {
 			}
 			tabs = tabs_filtered;
 			
-			// Génération des données copiées
+			// Generate copied data
 			if( format == 'html' ){
-				outputText = CopyTo.html(tabs);
+				outputText = await CopyTo.html(tabs);
 			} else if( format == 'custom' ) {
-				outputText = CopyTo.custom(tabs);
+				outputText = await CopyTo.custom(tabs);
 			} else if( format == 'json' ) {
 				outputText = CopyTo.json(tabs);
 				extended_mime = false;
@@ -104,10 +126,10 @@ Action = {
 				extended_mime = false;
 			}
 			
-			// Copie la liste d'URL dans le presse papier
-			Clipboard.write(outputText, extended_mime);
+			// Copy URL list to clipboard
+			await Clipboard.write(outputText, extended_mime);
 			
-			// Indique à la popup le nombre d'URL copiées, pour affichage dans la popup
+			// Tell popup the number of copied URLs for display
 			chrome.runtime.sendMessage({type: "copy", copied_url: tabs.length});
 			
 			// Tracking event
@@ -174,8 +196,12 @@ Action = {
 */
 CopyTo = {
 	// Copie les URLs des onglets au format html
-	html: function(tabs){
-		var anchor = localStorage['anchor'] ? localStorage['anchor'] : 'url';
+	html: async function(tabs){
+		const settings = await chrome.storage.local.get({
+			'anchor': 'url'
+		});
+		
+		var anchor = settings.anchor;
 		var row_anchor = '';
 		var s = '';
 		for (var i=0; i < tabs.length; i++) {
@@ -195,9 +221,13 @@ CopyTo = {
 	},
 	
 	// Copie les URLs des onglets au format custom
-	custom: function(tabs){
-		var template = (localStorage['format_custom_advanced'] && localStorage['format_custom_advanced'] != '') ? localStorage['format_custom_advanced'] : null;
-		if( template == null ){
+	custom: async function(tabs){
+		const settings = await chrome.storage.local.get({
+			'format_custom_advanced': ''
+		});
+		
+		var template = settings.format_custom_advanced;
+		if( !template || template === '' ){
 			return 'ERROR : Row template is empty ! (see options page)';
 		}
 		var s = '';
@@ -426,3 +456,17 @@ _gaq.push(['_setCustomVar', 1, 'Version', chrome.runtime.getManifest().version, 
 _gaq.push(['_setCustomVar', 2, 'Settings', AnalyticsHelper.getShortSettings(), 2]);
 _gaq.push(['_trackPageview']);
 // Note: In service workers, we can't load GA script directly, will need to use Measurement Protocol or other approach
+
+// Message listener for popup.js fallback communication
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+	if (message.action === 'copy') {
+		Action.copy({window: message.window, gaEvent: message.gaEvent});
+		return true;
+	}
+	if (message.action === 'paste') {
+		Action.paste({gaEvent: message.gaEvent});
+		return true;
+	}
+	// Let other message handlers run
+	return false;
+});

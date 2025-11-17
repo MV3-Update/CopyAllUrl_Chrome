@@ -6,6 +6,28 @@ chrome.runtime.getBackgroundPage().then((backgroundPage) => {
 	console.log('Background page not accessible in MV3');
 });
 
+// Helper for chrome.storage compatibility - transitional for localStorage migration
+const StorageHelper = {
+	get: async function(key, defaultValue) {
+		try {
+			const result = await chrome.storage.local.get({[key]: defaultValue});
+			return result[key];
+		} catch(e) {
+			// Fallback to localStorage if chrome.storage fails
+			return localStorage[key] || defaultValue;
+		}
+	},
+	
+	set: function(key, value) {
+		try {
+			chrome.storage.local.set({[key]: value});
+		} catch(e) {
+			// Fallback to localStorage
+			localStorage[key] = value;
+		}
+	}
+};
+
 // Chargement google analytics
 var _gaq = _gaq || [];
 chrome.runtime.getBackgroundPage().then((backgroundPage) => {
