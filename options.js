@@ -1,11 +1,22 @@
-// Récupération d'une référence vers la backgroundpage
-bkg = chrome.extension.getBackgroundPage();
+// Get reference to background script (service worker in Manifest V3)
+let bkg;
+chrome.runtime.getBackgroundPage().then((backgroundPage) => {
+	bkg = backgroundPage;
+}).catch(() => {
+	console.log('Background page not accessible in MV3');
+});
 
 // Chargement google analytics
 var _gaq = _gaq || [];
-_gaq.push(['_setAccount', bkg.AnalyticsHelper.gaAccount]);
-_gaq.push(['_trackPageview']);
-bkg.AnalyticsHelper.gaLoad(document);
+chrome.runtime.getBackgroundPage().then((backgroundPage) => {
+	if (backgroundPage && backgroundPage.AnalyticsHelper) {
+		_gaq.push(['_setAccount', backgroundPage.AnalyticsHelper.gaAccount]);
+		_gaq.push(['_trackPageview']);
+		backgroundPage.AnalyticsHelper.gaLoad(document);
+	}
+}).catch(() => {
+	console.log('Could not access background page for analytics');
+});
 
 jQuery(document).ready(function($){
 	// Définition du bouton email

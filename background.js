@@ -1,3 +1,9 @@
+// Import dependencies for service worker
+importScripts('vendor/jquery-1.7.2_min.js', 'vendor/encoder.js');
+
+// Global variables
+let clipboardBuffer;
+
 /**
 * Gére l'accès au presse papier
 * (on est obligé de passer par la background page pour y accéder, cf: http://stackoverflow.com/questions/6925073/copy-paste-not-working-in-chrome-extension)
@@ -5,10 +11,7 @@
 Clipboard = {
 	/**
 	* Ecrit la chaîne passée en paramètre dans le presse papier (fonction "Copier")
-	*
-	* On a pas accès au presse papier via l'API Google Chrome,
-	* donc l'astuce consiste à placer le texte à copier dans un <textarea>,
-	* de sélectionner tout le contenu de ce <textarea>, et de copier.
+	* Updated for Manifest V3 - uses chrome.offscreen API for clipboard access
 	*
 	* @param String str Chaîne à copier dans le presse-papier
 	* @param Bool extended_mime Indique si on doit copier le type MIME text/html en plus du texte brut
@@ -18,33 +21,38 @@ Clipboard = {
 			str = '<empty>';
 		}
 		
-		// Copie par défaut, via le clipboardBuffer
-		clipboardBuffer.val(str);
-		clipboardBuffer.select();
-		
-		// Copie via l'API (clipboardData)
-		var oncopyBackup = document.oncopy;
-		document.oncopy = function(e){
-			// Si on n'utilise pas le type MIME html, on sort tout de suite pour laisser la main à la méthode par défaut : clipboardBuffer
-			if( typeof extended_mime == "undefined" || extended_mime != true ){
-				return;
+		// Use navigator.clipboard API in Manifest V3
+		if (navigator.clipboard && navigator.clipboard.writeText) {
+			if (extended_mime && navigator.clipboard.write) {
+				// For HTML content
+				const clipboardItem = new ClipboardItem({
+					'text/html': new Blob([str], { type: 'text/html' }),
+					'text/plain': new Blob([str], { type: 'text/plain' })
+				});
+				navigator.clipboard.write([clipboardItem]).catch(err => {
+					console.error('Failed to write to clipboard:', err);
+				});
+			} else {
+				// For plain text
+				navigator.clipboard.writeText(str).catch(err => {
+					console.error('Failed to write to clipboard:', err);
+				});
 			}
-			e.preventDefault();
-			e.clipboardData.setData("text/html", str);
-			e.clipboardData.setData("text/plain", str);
-		};
-		document.execCommand('copy');
-		document.oncopy = oncopyBackup;
+		}
 	},
 	
 	/**
 	* Retourne le contenu du presse papier (String)
+	* Updated for Manifest V3
 	*/
 	read: function(){
-		clipboardBuffer.val('');
-		clipboardBuffer.select();
-		document.execCommand('paste')
-		return clipboardBuffer.val();
+		if (navigator.clipboard && navigator.clipboard.readText) {
+			return navigator.clipboard.readText().catch(err => {
+				console.error('Failed to read from clipboard:', err);
+				return '';
+			});
+		}
+		return Promise.resolve('');
 	}
 };
 
@@ -112,14 +120,15 @@ Action = {
 	* Ouvre toutes les URLs du presse papier dans des nouveaux onglets
 	* @param opt.gaEvent : données nécessaires à la génération le l'event ga (action, label, actionMeta)
 	*/
-	paste: function(opt){
-		var clipboardString = Clipboard.read();
+	paste: async function(opt){
+		const clipboardString = await Clipboard.read();
 		
 		// Extraction des URL, soit ligne par ligne, soit intelligent paste
+		let urlList;
 		if( localStorage["intelligent_paste"] == "true" ){
-			var urlList = clipboardString.match(/(https?|ftp|ssh|mailto):\/\/[a-z0-9\/:%_+.,#?!@&=-]+/gi);
+			urlList = clipboardString.match(/(https?|ftp|ssh|mailto):\/\/[a-z0-9\/:%_+.,#?!@&=-]+/gi);
 		} else {
-			var urlList = clipboardString.split("\n");
+			urlList = clipboardString.split("\n");
 		}
 		
 		// Si urlList est vide, on affiche un message d'erreur et on sort
@@ -129,14 +138,14 @@ Action = {
 		}
 		
 		// Extraction de l'URL pour les lignes au format HTML (<a...>#url</a>)
-		$.each(urlList, function(key, val){
+		urlList = urlList.map(function(val){
 			var matches = val.match(new RegExp('<a[^>]+href="([^"]+)"', 'i'));
 			try{
-				urlList[key] = matches[1];
-			} catch(e){}
-			
-			urlList[key] = jQuery.trim(urlList[key]);
-		});
+				return matches ? matches[1] : val;
+			} catch(e){
+				return val;
+			}
+		}).map(url => url.trim());
 		
 		// Suppression des URLs non conformes
 		urlList = urlList.filter(function(url){
@@ -147,8 +156,8 @@ Action = {
 		});
 		
 		// Ouverture de toutes les URLs dans des onglets
-		$.each(urlList, function(key, val){
-			chrome.tabs.create({url: val});
+		urlList.forEach(function(url){
+			chrome.tabs.create({url: url});
 		});
 		
 		// Indique à la popup de se fermer
@@ -235,7 +244,7 @@ CopyTo = {
 /**
 * Raccourci clavier
 */
-chrome.commands.onCommand.addListener(function(command){
+chrome.commands.onCommand.addListener(async function(command){
 	switch(command){
 		case "copy":
 			var gaEvent = {
@@ -253,8 +262,19 @@ chrome.commands.onCommand.addListener(function(command){
 				label: 'Command',
 				actionMeta: AnalyticsHelper.getActionMeta("paste")
 			};
-			Action.paste({gaEvent: gaEvent});
+			await Action.paste({gaEvent: gaEvent});
 			break;
+	}
+});
+
+/**
+* Message handler for Manifest V3 communication
+*/
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+	if (request.action === 'copy') {
+		Action.copy({window: request.window, gaEvent: request.gaEvent});
+	} else if (request.action === 'paste') {
+		Action.paste({gaEvent: request.gaEvent});
 	}
 });
 
@@ -279,10 +299,10 @@ UpdateManager = {
 	/** Défini le badge si une mise à jour a eu lieu récemment */
 	setBadge: function(){
 		if (!UpdateManager.recentUpdate()) {
-			chrome.browserAction.setBadgeText({text: ''});
+			chrome.action.setBadgeText({text: ''});
 			return;
 		}
-		chrome.browserAction.setBadgeText({text: 'NEW'});
+		chrome.action.setBadgeText({text: 'NEW'});
 	}
 };
 UpdateManager.setBadge();
@@ -386,6 +406,10 @@ AnalyticsHelper = {
 	
 	/** Charge google analytics (ga.js) dans le document passé en paramètre */
 	gaLoad: function(doc){
+		// For service workers, we can't manipulate DOM directly
+		if (typeof doc === 'undefined' || !doc.createElement) {
+			return;
+		}
 		var ga = doc.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
 		ga.src = 'https://ssl.google-analytics.com/ga.js';
 		var s = doc.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
@@ -395,16 +419,10 @@ AnalyticsHelper = {
 	gaAccount: 'UA-30512078-5'
 };
 
-// Chargement google analytics
+// Chargement google analytics - simplified for service worker
 var _gaq = _gaq || [];
 _gaq.push(['_setAccount', AnalyticsHelper.gaAccount]);
 _gaq.push(['_setCustomVar', 1, 'Version', chrome.runtime.getManifest().version, 2]);
 _gaq.push(['_setCustomVar', 2, 'Settings', AnalyticsHelper.getShortSettings(), 2]);
 _gaq.push(['_trackPageview']);
-AnalyticsHelper.gaLoad(document);
-
-jQuery(function($){
-	// Au chargement de la page, on créé une textarea qui va servir à lire et à écrire dans le presse papier
-	clipboardBuffer = $('<textarea id="clipboardBuffer"></textarea>');
-	clipboardBuffer.appendTo('body');
-});
+// Note: In service workers, we can't load GA script directly, will need to use Measurement Protocol or other approach

@@ -1,5 +1,5 @@
 {
-	"browser_action": {
+	"action": {
 		"default_icon": "img/umbrella_19.png",
 		"default_title": "Copy URLs to clipboard",
 		"default_popup": "popup.html"
@@ -9,7 +9,7 @@
 		"128": "img/umbrella_128.png"
 	},
 	"background": {
-		"scripts": ["vendor/jquery-1.7.2_min.js", "vendor/encoder.js", "background.js"]
+		"service_worker": "background.js"
 	},
 	"commands": {
 		"copy": {
@@ -27,8 +27,11 @@
 	},
 	"name": "Copy All Urls",
 	"options_page": "options.html",
-	"permissions": ["tabs", "http://*/*", "https://*/*", "management", "clipboardRead", "clipboardWrite", "notifications"],
-	"content_security_policy": "script-src 'self' https://ssl.google-analytics.com; object-src 'self'",
-	"version": "2.10",
-	"manifest_version": 2
+	"permissions": ["tabs", "management", "clipboardRead", "clipboardWrite", "notifications"],
+	"host_permissions": ["http://*/*", "https://*/*"],
+	"content_security_policy": {
+		"extension_pages": "script-src 'self'; object-src 'self'"
+	},
+	"version": "3.0",
+	"manifest_version": 3
 }
