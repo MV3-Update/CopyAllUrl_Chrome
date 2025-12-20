@@ -98,7 +98,7 @@ Action = {
 			tabQuery.windowId = null;
 		}
 		
-		const tabs = await chrome.tabs.query(tabQuery);
+		let tabs = await chrome.tabs.query(tabQuery);
 		// Get configuration
 		var format = settings.format;
 		var highlighted_tab_only = settings.highlighted_tab_only === 'true';
