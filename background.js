@@ -144,9 +144,14 @@ Action = {
 	paste: async function(opt){
 		const clipboardString = await Clipboard.read();
 		
+		// Get settings from chrome.storage
+		const settings = await chrome.storage.local.get({
+			'intelligent_paste': 'false'
+		});
+		
 		// Extraction des URL, soit ligne par ligne, soit intelligent paste
 		let urlList;
-		if( localStorage["intelligent_paste"] == "true" ){
+		if( settings.intelligent_paste === "true" ){
 			urlList = clipboardString.match(/(https?|ftp|ssh|mailto):\/\/[a-z0-9\/:%_+.,#?!@&=-]+/gi);
 		} else {
 			urlList = clipboardString.split("\n");
@@ -279,7 +284,7 @@ chrome.commands.onCommand.addListener(async function(command){
 			var gaEvent = {
 				action: 'Copy',
 				label: 'Command',
-				actionMeta: AnalyticsHelper.getActionMeta("copy")
+				actionMeta: await AnalyticsHelper.getActionMeta("copy")
 			};
 			const win = await chrome.windows.getCurrent();
 			Action.copy({window: win, gaEvent: gaEvent});
@@ -288,7 +293,7 @@ chrome.commands.onCommand.addListener(async function(command){
 			var gaEvent = {
 				action: 'Paste',
 				label: 'Command',
-				actionMeta: AnalyticsHelper.getActionMeta("paste")
+				actionMeta: await AnalyticsHelper.getActionMeta("paste")
 			};
 			await Action.paste({gaEvent: gaEvent});
 			break;
@@ -303,9 +308,12 @@ UpdateManager = {
 	runtimeOnInstalledStatus: null,
 	
 	/** (bool) Indique si une mise à jour de l'extension a eu lieu récemment */
-	recentUpdate: function(){
+	recentUpdate: async function(){
 		try {
-			var timeDiff = new Date().getTime() - new Date(parseInt(localStorage['update_last_time'])).getTime();
+			const result = await chrome.storage.local.get(['update_last_time']);
+			const lastUpdate = result.update_last_time;
+			if (!lastUpdate) return false;
+			var timeDiff = new Date().getTime() - new Date(parseInt(lastUpdate)).getTime();
 			if (timeDiff < 1000*3600*24) {
 				return true;
 			}
@@ -314,8 +322,8 @@ UpdateManager = {
 	},
 	
 	/** Défini le badge si une mise à jour a eu lieu récemment */
-	setBadge: function(){
-		if (!UpdateManager.recentUpdate()) {
+	setBadge: async function(){
+		if (!await UpdateManager.recentUpdate()) {
 			chrome.action.setBadgeText({text: ''});
 			return;
 		}
@@ -323,7 +331,7 @@ UpdateManager = {
 	}
 };
 UpdateManager.setBadge();
-chrome.runtime.onInstalled.addListener(function(details){
+chrome.runtime.onInstalled.addListener(async function(details){
 	if (details.reason != 'update') {
 		UpdateManager.runtimeOnInstalledStatus = "Not an update ("+details.reason+")"
 		return;
@@ -334,13 +342,15 @@ chrome.runtime.onInstalled.addListener(function(details){
 		return;
 	}
 	
-	// Mémorisation date de la dernière mise à jour
-	localStorage['update_last_time'] = new Date().getTime();
-	localStorage['update_previous_version'] = details.previousVersion;
+	// Store update time and version in chrome.storage
+	await chrome.storage.local.set({
+		'update_last_time': new Date().getTime(),
+		'update_previous_version': details.previousVersion
+	});
 	UpdateManager.runtimeOnInstalledStatus = "Updated";
 	
 	// Mise à jour badge
-	UpdateManager.setBadge();
+	await UpdateManager.setBadge();
 	
 	// Tracking event
 	_gaq.push(['_trackEvent', 'Lifecycle', 'Update', details.previousVersion]);
@@ -372,39 +382,54 @@ AnalyticsHelper = {
 	},
 	
 	/** Retourne une chaîne de caractère (objet json serialisé) qui contient des informations sur la configuration du plugin */
-	getShortSettings: function(settings){
-		if (settings == undefined) {
-			settings = localStorage;
-		}
+	getShortSettings: async function(settings){
+		const storedSettings = await chrome.storage.local.get({
+			'format': 'text',
+			'anchor': 'url',
+			'default_action': 'menu',
+			'mime': 'plaintext',
+			'highlighted_tab_only': 'false',
+			'intelligent_paste': 'false',
+			'walk_all_windows': 'false'
+		});
 		
 		var shortSettings = {
-			fm: localStorage['format'] ? localStorage['format'] : 'text',
-			an: localStorage['anchor'] ? localStorage['anchor'] : 'url',
-			da: localStorage['default_action'] ? localStorage['default_action'] : "menu",
-			mm: localStorage['mime'] ? localStorage['mime'] : 'plaintext',
-			hl: localStorage['highlighted_tab_only'] == "true" ? 1 : 0,
-			ip: localStorage['intelligent_paste'] == "true" ? 1 : 0,
-			ww: localStorage['walk_all_windows'] == "true" ? 1 : 0
+			fm: storedSettings['format'],
+			an: storedSettings['anchor'],
+			da: storedSettings['default_action'],
+			mm: storedSettings['mime'],
+			hl: storedSettings['highlighted_tab_only'] == "true" ? 1 : 0,
+			ip: storedSettings['intelligent_paste'] == "true" ? 1 : 0,
+			ww: storedSettings['walk_all_windows'] == "true" ? 1 : 0
 		};
 		
 		return AnalyticsHelper.serialize(shortSettings);
 	},
 	
 	/** Retourne un extrait de configuration pour le tracking des events de catégorie Action */
-	getActionMeta: function(action){
+	getActionMeta: async function(action){
+		const storedSettings = await chrome.storage.local.get({
+			'format': 'text',
+			'anchor': 'url',
+			'mime': 'plaintext',
+			'highlighted_tab_only': 'false',
+			'intelligent_paste': 'false',
+			'walk_all_windows': 'false'
+		});
+		
 		switch(action){
 			case "copy":
 				var shortSettings = {
-					fm: localStorage['format'] ? localStorage['format'] : 'text',
-					an: localStorage['anchor'] ? localStorage['anchor'] : 'url',
-					mm: localStorage['mime'] ? localStorage['mime'] : 'plaintext',
-					hl: localStorage['highlighted_tab_only'] == "true" ? 1 : 0,
-					ww: localStorage['walk_all_windows'] == "true" ? 1 : 0
+					fm: storedSettings['format'],
+					an: storedSettings['anchor'],
+					mm: storedSettings['mime'],
+					hl: storedSettings['highlighted_tab_only'] == "true" ? 1 : 0,
+					ww: storedSettings['walk_all_windows'] == "true" ? 1 : 0
 				};
 				break;
 			case "paste":
 				var shortSettings = {
-					ip: localStorage['intelligent_paste'] == "true" ? 1 : 0
+					ip: storedSettings['intelligent_paste'] == "true" ? 1 : 0
 				};
 				break;
 		}
@@ -440,8 +465,13 @@ AnalyticsHelper = {
 var _gaq = _gaq || [];
 _gaq.push(['_setAccount', AnalyticsHelper.gaAccount]);
 _gaq.push(['_setCustomVar', 1, 'Version', chrome.runtime.getManifest().version, 2]);
-_gaq.push(['_setCustomVar', 2, 'Settings', AnalyticsHelper.getShortSettings(), 2]);
-_gaq.push(['_trackPageview']);
+
+// Initialize settings asynchronously
+(async function() {
+	const shortSettings = await AnalyticsHelper.getShortSettings();
+	_gaq.push(['_setCustomVar', 2, 'Settings', shortSettings, 2]);
+	_gaq.push(['_trackPageview']);
+})();
 // Note: In service workers, we can't load GA script directly, will need to use Measurement Protocol or other approach
 
 // Message listener for popup.js communication
