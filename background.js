@@ -98,12 +98,12 @@ Action = {
 			tabQuery.windowId = null;
 		}
 		
-		chrome.tabs.query(tabQuery, async function(tabs){
-			// Get configuration
-			var format = settings.format;
-			var highlighted_tab_only = settings.highlighted_tab_only === 'true';
-			var extended_mime = settings.mime === 'html';
-			var outputText = '';
+		const tabs = await chrome.tabs.query(tabQuery);
+		// Get configuration
+		var format = settings.format;
+		var highlighted_tab_only = settings.highlighted_tab_only === 'true';
+		var extended_mime = settings.mime === 'html';
+		var outputText = '';
 			
 			// Filter tabs
 			var tabs_filtered = [];
@@ -135,7 +135,6 @@ Action = {
 			// Tracking event
 			_gaq.push(['_setCustomVar', 3, 'ActionMeta', opt.gaEvent.actionMeta]);
 			_gaq.push(['_trackEvent', 'Action', opt.gaEvent.action, opt.gaEvent.label, tabs.length]);
-		});
 	},
 	
 	/**
@@ -272,7 +271,7 @@ CopyTo = {
 };
 
 /**
-* Raccourci clavier
+* Keyboard shortcuts
 */
 chrome.commands.onCommand.addListener(async function(command){
 	switch(command){
@@ -282,9 +281,8 @@ chrome.commands.onCommand.addListener(async function(command){
 				label: 'Command',
 				actionMeta: AnalyticsHelper.getActionMeta("copy")
 			};
-			chrome.windows.getCurrent(function(win){
-				Action.copy({window: win, gaEvent: gaEvent});
-			});
+			const win = await chrome.windows.getCurrent();
+			Action.copy({window: win, gaEvent: gaEvent});
 			break;
 		case "paste":
 			var gaEvent = {
@@ -294,17 +292,6 @@ chrome.commands.onCommand.addListener(async function(command){
 			};
 			await Action.paste({gaEvent: gaEvent});
 			break;
-	}
-});
-
-/**
-* Message handler for Manifest V3 communication
-*/
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-	if (request.action === 'copy') {
-		Action.copy({window: request.window, gaEvent: request.gaEvent});
-	} else if (request.action === 'paste') {
-		Action.paste({gaEvent: request.gaEvent});
 	}
 });
 
@@ -379,8 +366,8 @@ chrome.runtime.onInstalled.addListener(function(details){
 AnalyticsHelper = {
 	/** Fonction qui récupère la clé de l'extension, pour récupérer des infos dessus (comme sa version) */
 	getChromeExtensionKey: function(){
-		var url = chrome.extension.getURL('stop');
-		var matches = chrome.extension.getURL('stop').match(new RegExp("[a-z0-9_-]+://([a-z0-9_-]+)/stop","i"));
+		var url = chrome.runtime.getURL('stop');
+		var matches = chrome.runtime.getURL('stop').match(new RegExp("[a-z0-9_-]+://([a-z0-9_-]+)/stop","i"));
 		return (matches[1] == undefined) ? false : matches[1];
 	},
 	
@@ -457,7 +444,7 @@ _gaq.push(['_setCustomVar', 2, 'Settings', AnalyticsHelper.getShortSettings(), 2
 _gaq.push(['_trackPageview']);
 // Note: In service workers, we can't load GA script directly, will need to use Measurement Protocol or other approach
 
-// Message listener for popup.js fallback communication
+// Message listener for popup.js communication
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	if (message.action === 'copy') {
 		Action.copy({window: message.window, gaEvent: message.gaEvent});
