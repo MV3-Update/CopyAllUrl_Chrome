@@ -15,12 +15,20 @@ This document outlines the changes made to migrate the Copy All URLs extension f
 
 ### 2. Background Script (`background.js`)
 - **Service Worker**: Now runs as service worker instead of persistent background page
-- **Import Scripts**: Added `importScripts()` for jQuery and encoder dependencies
-- **Clipboard API**: Updated to use modern `navigator.clipboard` API
-- **Async Functions**: Made clipboard operations async where needed
+- **Import Scripts**: Added `importScripts()` for encoder dependency (jQuery excluded - not compatible)
+- **Clipboard API**: Updated to use `chrome.offscreen` document for clipboard access
+- **Async Functions**: Made all functions async where needed for chrome.storage API
 - **DOM Access**: Removed direct DOM manipulation (service workers don't have DOM access)
-- **API Updates**: Changed `chrome.browserAction` to `chrome.action`
-- **Message Handling**: Added message listener for communication with popup
+- **API Updates**: Changed `chrome.browserAction` to `chrome.action` and `chrome.extension` to `chrome.runtime`
+- **Message Handling**: Added single message listener for communication with popup and keyboard commands
+- **Storage Updates**: 
+  - Replaced all `localStorage` with `chrome.storage.local`
+  - Updated `getShortSettings()` and `getActionMeta()` to be async
+  - Updated `UpdateManager.recentUpdate()` to use `chrome.storage.local`
+  - Made `UpdateManager.setBadge()` async
+- **Chrome Tabs API**: Converted `chrome.tabs.query()` callback to async/await
+- **Chrome Windows API**: Converted `chrome.windows.getCurrent()` callback to async/await
+- **Google Analytics**: Wrapped GA initialization in async IIFE to handle async settings retrieval
 
 ### 3. Popup Script (`popup.js`)
 - **Background Page Access**: Updated to use `chrome.runtime.getBackgroundPage()` with promises
@@ -59,13 +67,14 @@ This document outlines the changes made to migrate the Copy All URLs extension f
 
 ## Potential Issues
 
-1. **Google Analytics**: The current GA implementation may not work in service workers
-2. **Clipboard Access**: Some clipboard operations might require user interaction
+1. **Google Analytics**: The current GA implementation may not work in service workers - uses fallback queue
+2. **Clipboard Access**: Implemented via `chrome.offscreen` document for reliable access
 3. **Cross-Origin**: Some websites may block clipboard access due to security policies
+4. **Service Worker Lifecycle**: Service workers may be terminated after inactivity - state persisted via chrome.storage
 
 ## Future Improvements
 
-1. Consider using chrome.storage.sync for settings instead of localStorage
-2. Implement proper error handling for clipboard operations
-3. Update Google Analytics to use Google Analytics 4 or Measurement Protocol
-4. Add content script for enhanced clipboard access if needed
+1. Implement proper error handling for clipboard operations
+2. Update Google Analytics to use Google Analytics 4 or Measurement Protocol
+3. Add content script for enhanced clipboard access if needed
+4. Consider using chrome.storage.sync for synced settings across devices
